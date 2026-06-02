@@ -1,0 +1,70 @@
+# Render blueprint — declarative deploy for the ParkSphere API + Postgres.
+# The Next.js frontend deploys separately on Vercel (better CDN + DX for Next).
+#
+# To use:
+#   1. Push this repo to GitHub.
+#   2. Render → New + → Blueprint → connect your repo.
+#   3. Render reads this file, creates the api service + Postgres DB.
+#   4. After first deploy, set the remaining "sync: false" env vars by hand
+#      in the Render dashboard (their values depend on your Vercel URL).
+#   5. Open Render → api service → Shell → run `npm run db:seed --workspace=apps/api`
+#      to seed the admin user + plans + sample drivers.
+#
+# Free-tier notes:
+#   - Web service spins down after 15 min idle; first request takes ~10s to wake.
+#   - Postgres is 1 GB / 256 MB RAM, deleted after 90 days of inactivity. Fine
+#     for a demo period.
+
+services:
+  - type: web
+    name: parksphere-api
+    env: node
+    plan: free
+    region: singapore   # change to your region; e.g. oregon, frankfurt, ohio
+    rootDir: .
+    # Build:
+    #   - Install workspace deps from the root (we use npm workspaces).
+    #   - Generate Prisma client against the Postgres schema.
+    #   - Compile NestJS to apps/api/dist.
+    buildCommand: >
+      npm install &&
+      cd apps/api &&
+      npx prisma generate --schema=./prisma/schema.postgres.prisma &&
+      npm run build
+    # Start:
+    #   - Push the schema (idempotent — creates tables on first boot, syncs on later).
+    #   - Run the compiled API. Render injects PORT; main.ts reads it.
+    startCommand: >
+      cd apps/api &&
+      npx prisma db push --schema=./prisma/schema.postgres.prisma --accept-data-loss --skip-generate &&
+      node dist/main
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: parksphere-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      # All env vars below must be set manually in the Render dashboard once
+      # the Vercel URL is known.
+      - key: API_CORS_ORIGIN
+        sync: false  # e.g. https://parksphere.vercel.app
+      - key: DRIVER_PORTAL_URL
+        sync: false  # e.g. https://parksphere.vercel.app/driver/login
+      # Optional — leave unset to stay in DRY-RUN WhatsApp mode.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+
+databases:
+  - name: parksphere-db
+    plan: free
+    region: singapore   # match the api service's region
+    databaseName: parksphere
+    user: parksphere

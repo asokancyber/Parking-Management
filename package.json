@@ -1,0 +1,29 @@
+{
+  "name": "parksphere-enterprise",
+  "version": "0.2.0",
+  "private": true,
+  "description": "ParkSphere Enterprise — Smart Vehicle Access Control & Parking Subscription Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,magenta \"npm:dev --workspace=apps/api\" \"npm:dev --workspace=apps/web\"",
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down",
+    "infra:logs": "docker compose logs -f",
+    "db:push:sqlite": "npm run prisma:push:sqlite --workspace=apps/api",
+    "db:push:postgres": "npm run prisma:push:postgres --workspace=apps/api",
+    "db:migrate:postgres": "npm run prisma:migrate:postgres --workspace=apps/api",
+    "db:seed": "npm run prisma:seed --workspace=apps/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}

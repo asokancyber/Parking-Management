@@ -1,0 +1,224 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ────────────────────────────────────────────────────────────────────
+   Theme tokens
+   --------------------------------------------------------------------
+   Every colour the app uses is a CSS variable. Tailwind references these
+   as rgb(var(--xxx) / <alpha-value>), so utilities like bg-bg-base,
+   text-text-primary, from-accent-cyan all switch automatically when the
+   <html data-theme="..."> attribute changes. localStorage persists the
+   choice; an inline script in layout.tsx sets the attribute before the
+   first paint to avoid a flash.
+   ──────────────────────────────────────────────────────────────────── */
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* surfaces */
+  --bg-base:     247 249 252;   /* off-white, slightly cool */
+  --bg-elevated: 255 255 255;
+  --bg-panel:    255 255 255;
+  --bg-ring:     226 232 240;
+
+  /* text */
+  --text-primary:   10 16 36;
+  --text-secondary: 71 85 105;
+  --text-muted:     148 163 184;
+
+  /* accents (slightly deepened for legibility on white) */
+  --accent-cyan:    8 145 178;
+  --accent-violet:  124 58 237;
+  --accent-amber:   217 119 6;
+  --accent-rose:    225 29 72;
+  --accent-lime:    132 204 22;
+
+  /* effects */
+  --panel-bg: rgb(255 255 255);
+  --panel-border: rgb(226 232 240);
+  --panel-shadow:
+    0 1px 3px 0 rgb(15 23 42 / 0.05),
+    0 10px 40px -16px rgb(8 145 178 / 0.18);
+  --panel-strong-bg: rgb(255 255 255);
+  --panel-strong-border: rgb(226 232 240);
+  --panel-strong-shadow:
+    0 4px 16px -4px rgb(15 23 42 / 0.08),
+    0 24px 60px -24px rgb(8 145 178 / 0.22);
+  --grid-line: rgba(8, 145, 178, 0.07);
+  --body-bg:
+    radial-gradient(1000px circle at 15% -10%, rgba(8, 145, 178, 0.08), transparent 55%),
+    radial-gradient(1000px circle at 110% 110%, rgba(124, 58, 237, 0.08), transparent 55%),
+    linear-gradient(180deg, #f7f9fc 0%, #ffffff 100%);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-base:     5 7 13;
+  --bg-elevated: 10 14 26;
+  --bg-panel:    13 19 34;
+  --bg-ring:     23 32 55;
+
+  --text-primary:   233 237 247;
+  --text-secondary: 154 166 194;
+  --text-muted:     93 105 133;
+
+  --accent-cyan:    34 225 255;
+  --accent-violet:  124 92 255;
+  --accent-amber:   255 183 77;
+  --accent-rose:    255 93 143;
+  --accent-lime:    163 255 93;
+
+  --panel-bg: linear-gradient(180deg, rgba(13, 19, 34, 0.85), rgba(10, 14, 26, 0.85));
+  --panel-border: rgba(124, 92, 255, 0.18);
+  --panel-shadow: 0 12px 60px -10px rgba(34, 225, 255, 0.10);
+  --panel-strong-bg: linear-gradient(180deg, rgba(13, 19, 34, 0.95), rgba(10, 14, 26, 0.95));
+  --panel-strong-border: rgba(34, 225, 255, 0.22);
+  --panel-strong-shadow: 0 30px 80px -30px rgba(34, 225, 255, 0.20);
+  --grid-line: rgba(124, 92, 255, 0.06);
+  --body-bg:
+    radial-gradient(900px circle at 15% -10%, rgba(34, 225, 255, 0.10), transparent 55%),
+    radial-gradient(900px circle at 110% 110%, rgba(124, 92, 255, 0.12), transparent 55%),
+    linear-gradient(180deg, #05070d 0%, #04060c 100%);
+}
+
+html, body {
+  background: rgb(var(--bg-base));
+  color: rgb(var(--text-primary));
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--body-bg);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+/* Animated grid backdrop */
+.grid-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, #000 35%, transparent 80%);
+  pointer-events: none;
+}
+
+/* Primary glass / opaque panel */
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  backdrop-filter: blur(18px) saturate(140%);
+  border-radius: 18px;
+  box-shadow: var(--panel-shadow);
+}
+
+.panel-strong {
+  background: var(--panel-strong-bg);
+  border: 1px solid var(--panel-strong-border);
+  border-radius: 22px;
+  box-shadow: var(--panel-strong-shadow);
+}
+
+/* QR border glow — dark only (looks weird on white) */
+.qr-glow {
+  position: relative;
+}
+[data-theme='dark'] .qr-glow::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 26px;
+  background: conic-gradient(from 0deg, rgb(var(--accent-cyan)), rgb(var(--accent-violet)), rgb(var(--accent-cyan)));
+  filter: blur(18px);
+  opacity: 0.55;
+  z-index: -1;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   App sidebar (admin + driver)
+   --------------------------------------------------------------------
+   ALWAYS dark, regardless of root theme. In light mode this gives a
+   high-contrast "command rail" against the white content area (Linear,
+   Vercel, Supabase pattern). In dark mode it's a slightly different
+   gradient than the body, so the chrome still reads as distinct.
+
+   We override the CSS variables *inside the .app-sidebar scope only*
+   so every Tailwind class (bg-bg-elevated, text-text-primary, ring-*)
+   inside the sidebar uses the dark palette automatically — no
+   per-component refactor needed.
+   ──────────────────────────────────────────────────────────────────── */
+
+.app-sidebar {
+  /* Scoped dark palette */
+  --bg-base:        5 7 13;
+  --bg-elevated:    10 14 26;
+  --bg-panel:       13 19 34;
+  --bg-ring:        23 32 55;
+  --text-primary:   233 237 247;
+  --text-secondary: 154 166 194;
+  --text-muted:     93 105 133;
+  --accent-cyan:    34 225 255;
+  --accent-violet:  124 92 255;
+  --accent-amber:   255 183 77;
+  --accent-rose:    255 93 143;
+  --accent-lime:    163 255 93;
+
+  background: linear-gradient(180deg, #0e1530 0%, #070b1a 100%) !important;
+  border-right: 1px solid rgba(34, 225, 255, 0.16) !important;
+  color: rgb(233 237 247);
+  box-shadow:
+    inset -1px 0 0 rgba(34, 225, 255, 0.06),
+    4px 0 24px -8px rgba(8, 13, 30, 0.35);
+}
+
+/* Pills inside the sidebar need their dark-mode text colours (the scoped
+   vars don't reach @apply colours from light-mode globals). */
+.app-sidebar .pill-online  { @apply text-emerald-300; }
+.app-sidebar .pill-offline { @apply text-rose-300; }
+.app-sidebar .pill-warn    { @apply text-amber-300; }
+.app-sidebar .pill-info    { @apply text-cyan-300; }
+
+/* Status pills */
+.pill {
+  @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset;
+}
+.pill-online  { @apply bg-emerald-500/10 text-emerald-700 ring-emerald-500/30; }
+.pill-offline { @apply bg-rose-500/10    text-rose-700    ring-rose-500/30; }
+.pill-warn    { @apply bg-amber-500/10   text-amber-700   ring-amber-500/30; }
+.pill-info    { @apply bg-cyan-500/10    text-cyan-700    ring-cyan-500/30; }
+
+[data-theme='dark'] .pill-online  { @apply text-emerald-300; }
+[data-theme='dark'] .pill-offline { @apply text-rose-300; }
+[data-theme='dark'] .pill-warn    { @apply text-amber-300; }
+[data-theme='dark'] .pill-info    { @apply text-cyan-300; }
+
+/* Number scrub for big stat tiles */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'cv11' 1;
+}
+
+/* Native form contrast tweaks for light mode */
+[data-theme='light'] input,
+[data-theme='light'] select,
+[data-theme='light'] textarea {
+  color-scheme: light;
+}
+[data-theme='dark'] input,
+[data-theme='dark'] select,
+[data-theme='dark'] textarea {
+  color-scheme: dark;
+}
+
+/* Slightly larger focus ring on light theme for accessibility */
+[data-theme='light'] *:focus-visible {
+  outline: 2px solid rgb(var(--accent-cyan));
+  outline-offset: 2px;
+}

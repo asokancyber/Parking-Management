@@ -1,0 +1,340 @@
+// ParkSphere Enterprise — Postgres variant.
+// Enterprise Smart Vehicle Access Control & Parking Subscription Platform.
+// Access is via RFID/NFC cards. (QR was removed in the v0.2 pivot.)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── ENUMS ───────────────────────────
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+  DRIVER
+}
+
+enum SubscriptionStatus {
+  PENDING_PAYMENT
+  ACTIVE
+  EXPIRED
+  GRACE_PERIOD
+  LAPSED
+  SUSPENDED
+  BLACKLISTED
+}
+
+enum ReminderKind {
+  T_MINUS_14
+  T_MINUS_7
+  T_MINUS_3
+  T_MINUS_1
+  T_ZERO
+  GRACE_1
+  LAPSED
+  MANUAL
+}
+
+enum ReminderChannel {
+  WHATSAPP
+  SMS
+  EMAIL
+  IN_APP
+}
+
+enum ReminderStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  DELIVERED
+  FAILED
+  CANCELLED
+  DRY_RUN
+}
+
+enum GateDirection {
+  ENTRY
+  EXIT
+  BIDIRECTIONAL
+}
+
+enum GateStatus {
+  ONLINE
+  OFFLINE
+  MAINTENANCE
+}
+
+enum CardStatus {
+  IN_STOCK     // printed but not yet assigned to a driver
+  ACTIVE       // assigned + permitted
+  SUSPENDED    // temporarily disabled (admin action, e.g. dispute)
+  LOST         // reported lost by driver
+  BLACKLISTED  // permanently revoked
+  RETIRED      // replaced by another card or end-of-life
+}
+
+enum TapResult {
+  GRANTED
+  DENIED_CARD_UNKNOWN
+  DENIED_CARD_INACTIVE
+  DENIED_CARD_LOST
+  DENIED_CARD_BLACKLISTED
+  DENIED_CARD_EXPIRED
+  DENIED_CARD_UNASSIGNED
+  DENIED_NO_SUBSCRIPTION
+  DENIED_SUBSCRIPTION_EXPIRED
+  DENIED_SUBSCRIPTION_SUSPENDED
+  DENIED_VEHICLE_UNKNOWN
+  DENIED_GATE_OFFLINE
+  DENIED_GATE_UNAUTHORIZED // bad/missing reader access token
+  ERROR
+}
+
+enum AuditCategory {
+  AUTH
+  CARD
+  TAP
+  GATE_COMMAND
+  SUBSCRIPTION
+  SETTINGS
+  ADMIN_ACTION
+}
+
+// ─────────────────────────── MODELS ───────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  fullName     String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  driver Driver?
+
+  @@index([role])
+}
+
+model Driver {
+  id              String   @id @default(cuid())
+  publicId        String   @unique
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phone           String   @unique
+  fullName        String
+  company         String?
+  preferredChannel ReminderChannel @default(WHATSAPP)
+  whatsappOptOut  Boolean  @default(false)
+  forceChangePassword Boolean @default(false)
+  lockedAt        DateTime?
+  lockedReason    String?
+  lastLoginAt     DateTime?
+  passwordChangedAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  vehicles      Vehicle[]
+  subscriptions Subscription[]
+  cards         Card[]
+  cardAssignments CardAssignment[]
+  taps          CardTapEvent[]
+  reminders     Reminder[]
+}
+
+model Vehicle {
+  id         String   @id @default(cuid())
+  plate      String   @unique
+  type       String // CAR, LORRY, VAN, MOTORCYCLE
+  driverId   String
+  driver     Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  taps CardTapEvent[]
+}
+
+model Subscription {
+  id              String             @id @default(cuid())
+  driverId        String
+  driver          Driver             @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  planName        String
+  priceCents      Int
+  currency        String             @default("MYR")
+  status          SubscriptionStatus @default(PENDING_PAYMENT)
+  startsAt        DateTime
+  expiresAt       DateTime
+  autoRenew       Boolean            @default(false)
+  gracePeriodDays Int                @default(3)
+  lastRenewedAt   DateTime?
+  lastRenewedFor  Int?
+  lastPaymentRef  String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  reminders       Reminder[]
+
+  @@index([driverId])
+  @@index([status, expiresAt])
+}
+
+model Gate {
+  id          String        @id @default(cuid())
+  code        String        @unique
+  name        String
+  direction   GateDirection
+  status      GateStatus    @default(ONLINE)
+  zone        String?
+  capacity    Int           @default(0)
+  occupancy   Int           @default(0)
+  // Bearer token presented by the physical RFID reader on /card-access/tap.
+  // Plaintext here — for production, store a hash and surface the raw token
+  // only at creation time. (See README hardening checklist.)
+  accessToken String        @unique
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  taps CardTapEvent[]
+}
+
+// RFID / NFC physical card. Identified by uid (the chip's hardware UID), which
+// is what the reader sends to the backend.
+model Card {
+  id         String     @id @default(cuid())
+  uid        String     @unique
+  label      String?
+  status     CardStatus @default(IN_STOCK)
+  driverId   String?
+  driver     Driver?    @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  issuedAt   DateTime?
+  expiresAt  DateTime?
+  notes      String?
+  // Self-reference forming a replacement chain. If this card replaces an
+  // older one, replacesId points at the older card's id. The reverse
+  // (`replacedBy`) tells you whether this card has been superseded.
+  replacesId String?    @unique
+  replaces   Card?      @relation("CardReplacement", fields: [replacesId], references: [id])
+  replacedBy Card?      @relation("CardReplacement")
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  taps        CardTapEvent[]
+  assignments CardAssignment[]
+
+  @@index([status])
+  @@index([driverId])
+}
+
+// Append-only history of card-to-driver assignments. Created whenever a card
+// is issued, transferred, returned, or replaced.
+model CardAssignment {
+  id        String   @id @default(cuid())
+  cardId    String
+  card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  driverId  String?
+  driver    Driver?  @relation(fields: [driverId], references: [id], onDelete: SetNull)
+  fromAt    DateTime @default(now())
+  toAt      DateTime?
+  reason    String // 'INITIAL_ISSUE' | 'TRANSFER' | 'LOST' | 'REPLACEMENT' | 'RETURN' | 'BLACKLIST'
+  actorId   String?
+
+  @@index([cardId])
+  @@index([driverId])
+}
+
+// Every reader tap — granted or denied — is recorded.
+model CardTapEvent {
+  id        String   @id @default(cuid())
+  gateId    String
+  gate      Gate     @relation(fields: [gateId], references: [id])
+  // Raw UID always recorded so we can audit attempts with unknown cards.
+  cardUid   String
+  cardId    String?
+  card      Card?    @relation(fields: [cardId], references: [id])
+  driverId  String?
+  driver    Driver?  @relation(fields: [driverId], references: [id])
+  vehicleId String?
+  vehicle   Vehicle? @relation(fields: [vehicleId], references: [id])
+  result    TapResult
+  reason    String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([gateId, createdAt])
+  @@index([cardId, createdAt])
+  @@index([driverId, createdAt])
+  @@index([result])
+}
+
+model AuditLog {
+  id         String        @id @default(cuid())
+  category   AuditCategory
+  actorId    String?
+  actorRole  UserRole?
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   String? // JSON-encoded (String for parity with SQLite variant)
+  ipAddress  String?
+  createdAt  DateTime      @default(now())
+
+  @@index([category, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model AppSetting {
+  key       String   @id
+  value     String // JSON-encoded
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+// Scheduled / sent renewal reminders. See SQLite schema for full doc.
+model Reminder {
+  id              String   @id @default(cuid())
+  driverId        String
+  driver          Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  subscriptionId  String
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  kind            ReminderKind
+  channel         ReminderChannel
+  status          ReminderStatus @default(SCHEDULED)
+  scheduledFor    DateTime
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  failedAt        DateTime?
+  cancelledAt     DateTime?
+  attempts        Int      @default(0)
+  failReason      String?
+  externalId      String?
+  renderedBody    String?
+  recipientPhone  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, scheduledFor])
+  @@index([driverId, createdAt])
+  @@index([subscriptionId])
+}
+
+// Subscription plan presets. Subscription stores planName + priceCents as a
+// snapshot, so historical records survive plan edits.
+model Plan {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  priceCents   Int
+  durationDays Int
+  description  String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([active])
+}

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"C:/Users/AsokanALDhanabalan/Desktop/Workload/Project/jeevan anne/Parking Management system\" && rm -rf \"apps/api/src/qr\" \"apps/api/src/gate-command\" \"apps/web/src/app/gate/[code]/kiosk\" \"apps/web/src/app/scan\" && echo \"Removed QR + gate-command backend, kiosk + scan frontend\")"
+    ]
+  }
+}
